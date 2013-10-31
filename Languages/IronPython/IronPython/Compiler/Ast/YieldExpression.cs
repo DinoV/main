@@ -42,23 +42,6 @@ namespace IronPython.Compiler.Ast {
             get { return _expression; }
         }
 
-        // Generate AST statement to call $gen.CheckThrowable() on the Python Generator.
-        // This needs to be injected at any yield suspension points, mainly:
-        // - at the start of the generator body
-        // - after each yield statement.
-        static internal MSAst.Expression CreateCheckThrowExpression(SourceSpan span) {
-            MSAst.Expression instance = GeneratorRewriter._generatorParam;
-            Debug.Assert(instance.Type == typeof(IronPython.Runtime.PythonGenerator));
-
-            MSAst.Expression s2 = LightExceptions.CheckAndThrow(
-                Expression.Call(
-                    AstMethods.GeneratorCheckThrowableAndReturnSendValue,
-                    instance
-                )
-            );
-            return s2;
-        }
-
         public override MSAst.Expression Reduce() {
             // (yield z) becomes:
             // .comma (1) {
@@ -71,7 +54,7 @@ namespace IronPython.Compiler.Ast {
                     GeneratorLabel,
                     AstUtils.Convert(_expression, typeof(object))
                 ),
-                CreateCheckThrowExpression(Span) // emits ($gen.CheckThrowable())
+                GeneratorRewriter._checkThrowExpression
             );
         }
 

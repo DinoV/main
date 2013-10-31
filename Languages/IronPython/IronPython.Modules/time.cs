@@ -12,7 +12,7 @@
  *
  *
  * ***************************************************************************/
-
+//#define PY_STRPTIME
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -188,10 +188,32 @@ namespace IronPython.Modules {
         }
 
         public static object strptime(CodeContext/*!*/ context, string @string) {
+#if PY_STRPTIME
+            return PythonOps.CallWithContext(
+                context,
+                PythonOps.GetBoundAttr(
+                    context,
+                    Importer.Import(context, "_strptime", null, 0),
+                    "_strptime"
+                )
+            );
+#else
             return DateTime.Parse(@string, PythonLocale.GetLocaleInfo(context).Time.DateTimeFormat);
+#endif
         }
 
         public static object strptime(CodeContext/*!*/ context, string @string, string format) {
+#if PY_STRPTIME
+            return PythonOps.CallWithContext(
+                context,
+                PythonOps.GetBoundAttr(
+                    context,
+                    Importer.Import(context, "_strptime", null, 0),
+                    "_strptime"
+                ),
+                format
+            );
+#else
             bool postProc;
             FoundDateComponents foundDateComp;
             List<FormatInfo> formatInfo = PythonFormatToCLIFormat(format, true, out postProc, out foundDateComp);
@@ -256,6 +278,7 @@ namespace IronPython.Modules {
             }
 
             return GetDateTimeTuple(res, dayOfWeek);
+#endif
         }
 
         internal static string strftime(CodeContext/*!*/ context, string format, DateTime dt, int? microseconds) {

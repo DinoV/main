@@ -420,6 +420,11 @@ namespace IronPython.Compiler.Ast {
             return base.Walk(node);
         }
 
+        public override bool Walk(YieldFromExpression node) {
+            node.Parent = _currentScope;
+            return base.Walk(node);
+        }
+
         public override bool Walk(UnaryExpression node) {
             node.Parent = _currentScope;
             return base.Walk(node);

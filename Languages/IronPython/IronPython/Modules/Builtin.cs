@@ -2476,6 +2476,43 @@ namespace IronPython.Modules {
         [SpecialName]
         public static void PerformModuleReload(PythonContext context, PythonDictionary dict) {
             dict["__debug__"] = ScriptingRuntimeHelpers.BooleanToObject(!context.PythonOptions.Optimize);
+            if (((PythonOptions)context.Options).Python30) {
+                // In Python 3k, StopIteration has a value property, and therefore is incompatible for multiple
+                // inheritance from other exception types w/ field (e.g. EnvironmentError).  So we create StopIteration
+                // on startup here and update __builtins__ and exceptions (even though exceptions no longer exists, but
+                // we really shouldn't have 2 StopIteration exceptions floating around before we remove exceptions)
+                if (_stopIterationException3x == null) {
+                    _stopIterationException3x  = PythonExceptions.CreateSubType(PythonExceptions.Exception, typeof(_StopIteration3k), msg => new StopIterationException(msg));
+                }
+                dict["StopIteration"] = _stopIterationException3x;
+                context.GetBuiltinModule("exceptions").__dict__["StopIteration"] = _stopIterationException3x;
+                
+                //dict["range"] = DynamicHelpers.GetPythonTypeFromType(typeof(XRange));
+                //dict.Remove("xrange");
+            }
+        }
+
+        internal static PythonType _stopIterationException3x;
+
+        [PythonType("StopIteration"), PythonHidden, DynamicBaseTypeAttribute, Serializable]
+        public partial class _StopIteration3k : PythonExceptions.BaseException {
+            private object _value;
+
+            public _StopIteration3k() : base(EnvironmentError) { }
+            public _StopIteration3k(PythonType type) : base(type) { }
+
+            public new static object __new__(PythonType cls, params object[] args) {
+                var res = (_StopIteration3k)Activator.CreateInstance(cls.UnderlyingSystemType, cls);
+                if (args.Length > 0) {
+                    res.value = args[0];
+                }
+                return res;
+            }
+
+            public object value {
+                get { return _value; }
+                set { _value = value; }
+            }
         }
     }
 }

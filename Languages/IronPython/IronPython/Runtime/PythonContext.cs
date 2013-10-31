@@ -202,6 +202,9 @@ namespace IronPython.Runtime {
 
         internal readonly List<FunctionStack> _mainThreadFunctionStack;
         private CallSite<Func<CallSite, CodeContext, object, object>> _callSite0LightEh;
+        private CallSite<Func<CallSite, CodeContext, object, object, object>> _callSite1LightEh;
+        private CallSite<Func<CallSite, CodeContext, object, object, object, object>> _callSite2LightEh;
+        private CallSite<Func<CallSite, CodeContext, object, object, object, object, object>> _callSite3LightEh;
         private List<WeakReference> _weakExtensionMethodSets;
 
         #region Generated Python Shared Call Sites Storage
@@ -883,13 +886,13 @@ namespace IronPython.Runtime {
             return options.Interpreted || adaptiveCompilation;
         }
 
-        private static PyAst.PythonAst ParseAndBindAst(CompilerContext context) {
+        private PyAst.PythonAst ParseAndBindAst(CompilerContext context) {
             ScriptCodeParseResult properties = ScriptCodeParseResult.Complete;
             bool propertiesSet = false;
             int errorCode = 0;
 
             PyAst.PythonAst ast;
-            using (Parser parser = Parser.CreateParser(context, PythonContext.GetPythonOptions(null))) {
+            using (Parser parser = Parser.CreateParser(context, PythonOptions)) {
                 switch (context.SourceUnit.Kind) {
                     case SourceCodeKind.InteractiveCode:
                         ast = parser.ParseInteractiveCode(out properties);
@@ -935,7 +938,7 @@ namespace IronPython.Runtime {
             return ast;
         }
 
-        internal static ScriptCode CompilePythonCode(SourceUnit/*!*/ sourceUnit, CompilerOptions/*!*/ options, ErrorSink/*!*/ errorSink) {
+        internal ScriptCode CompilePythonCode(SourceUnit/*!*/ sourceUnit, CompilerOptions/*!*/ options, ErrorSink/*!*/ errorSink) {
             var pythonOptions = (PythonCompilerOptions)options;
 
             if (sourceUnit.Kind == SourceCodeKind.File) {
@@ -2814,12 +2817,60 @@ namespace IronPython.Runtime {
             }
         }
 
+        private void EnsureCall1SiteLightEh() {
+            if (_callSite1LightEh == null) {
+                Interlocked.CompareExchange(
+                    ref _callSite1LightEh,
+                    CallSite<Func<CallSite, CodeContext, object, object, object>>.Create(Invoke(new CallSignature(1)).GetLightExceptionBinder()),
+                    null
+                );
+            }
+        }
+
+        private void EnsureCall2SiteLightEh() {
+            if (_callSite2LightEh == null) {
+                Interlocked.CompareExchange(
+                    ref _callSite2LightEh,
+                    CallSite<Func<CallSite, CodeContext, object, object, object, object>>.Create(Invoke(new CallSignature(2)).GetLightExceptionBinder()),
+                    null
+                );
+            }
+        }
+
+        private void EnsureCall3SiteLightEh() {
+            if (_callSite3LightEh == null) {
+                Interlocked.CompareExchange(
+                    ref _callSite3LightEh,
+                    CallSite<Func<CallSite, CodeContext, object, object, object, object, object>>.Create(Invoke(new CallSignature(3)).GetLightExceptionBinder()),
+                    null
+                );
+            }
+        }
+        
         internal object CallLightEh(CodeContext/*!*/ context, object func) {
             EnsureCall0SiteLightEh();
 
             return _callSite0LightEh.Target(_callSite0LightEh, context, func);
         }
 
+        internal object CallLightEh(CodeContext/*!*/ context, object func, object arg0) {
+            EnsureCall1SiteLightEh();
+
+            return _callSite1LightEh.Target(_callSite1LightEh, context, func, arg0);
+        }
+
+        internal object CallLightEh(CodeContext/*!*/ context, object func, object arg0, object arg1) {
+            EnsureCall2SiteLightEh();
+
+            return _callSite2LightEh.Target(_callSite2LightEh, context, func, arg0, arg1);
+        }
+
+        internal object CallLightEh(CodeContext/*!*/ context, object func, object arg0, object arg1, object arg2) {
+            EnsureCall3SiteLightEh();
+
+            return _callSite3LightEh.Target(_callSite3LightEh, context, func, arg0, arg1, arg2);
+        }
+        
         internal object Call(CodeContext/*!*/ context, object func, object arg0) {
             EnsureCall1Site();
 

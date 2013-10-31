@@ -624,7 +624,7 @@ namespace IronPython.Compiler.Ast {
             // The exception traceback needs to come from the generator's method body, and so we must do the check and throw
             // from inside the generator.
             if (IsGenerator) {
-                MSAst.Expression s1 = YieldExpression.CreateCheckThrowExpression(SourceSpan.None);
+                MSAst.Expression s1 = GeneratorRewriter._checkThrowExpression;
                 statements.Add(s1);
             }
 

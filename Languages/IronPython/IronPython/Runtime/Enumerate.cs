@@ -241,6 +241,19 @@ namespace IronPython.Runtime {
             this._baseObject = iter;
         }
 
+        /// <summary>
+        /// Used when you want to dispatch to the real Python iterable.  Returns the original wrapped
+        /// object if a PythonEnumerator or the object passed in.
+        /// </summary>
+        /// <param name="maybeEnumerator"></param>
+        /// <returns></returns>
+        internal static object Unwrap(object maybeEnumerator) {
+            PythonEnumerator enumerator = maybeEnumerator as PythonEnumerator;
+            if (enumerator != null) {
+                return enumerator._baseObject;
+            }
+            return maybeEnumerator;
+        }
 
         #region IEnumerator Members
 
@@ -255,6 +268,12 @@ namespace IronPython.Runtime {
         }
 
         public bool MoveNext() {
+            object dummy;
+            return MoveNextWorker(DefaultContext.Default, out dummy);
+        }
+
+        internal bool MoveNextWorker(CodeContext context, out object retValue) {
+            retValue = null;
             if (_nextMethod == null) {
                 if (!PythonOps.TryGetBoundAttr(_baseObject, "next", out _nextMethod) || _nextMethod == null) {
                     throw PythonOps.TypeError("instance has no next() method");
@@ -262,17 +281,19 @@ namespace IronPython.Runtime {
             }
 
             try {
-                _current = DefaultContext.Default.LanguageContext.CallLightEh(DefaultContext.Default, _nextMethod);
+                _current = context.LanguageContext.CallLightEh(context, _nextMethod);
                 Exception lightEh = LightExceptions.GetLightException(_current);
                 if (lightEh != null) {
                     if (lightEh is StopIterationException) {
+                        retValue = ((StopIterationException)lightEh).GetValue(context);
                         return false;
                     }
 
                     throw lightEh;
                 }
                 return true;
-            } catch (StopIterationException) {
+            } catch (StopIterationException ex) {
+                retValue = ex.GetValue(context);
                 return false;
             }
         }

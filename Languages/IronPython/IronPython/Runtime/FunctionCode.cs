@@ -612,7 +612,8 @@ namespace IronPython.Runtime {
         /// registered incase our tracing mode changes.
         /// </summary>
         internal static FunctionCode FromSourceUnit(SourceUnit sourceUnit, PythonCompilerOptions options, bool register) {
-            var code = PythonContext.CompilePythonCode(sourceUnit, options, ThrowingErrorSink.Default);
+
+            var code = ((PythonContext)sourceUnit.LanguageContext).CompilePythonCode(sourceUnit, options, ThrowingErrorSink.Default);
 
             return ((RunnableScriptCode)code).GetFunctionCode(register);
         }

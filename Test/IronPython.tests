@@ -5,6 +5,17 @@
       <Name>Languages\IronPython\IronPython\2.X\builtinfuncs</Name>
       <Tests>
         <Test>
+          <Name>test_pep380</Name>
+          <Filename>%DLR_ROOT%\Languages\IronPython\Internal\ipy.bat</Filename>
+          <Arguments>-X:Python30 test_pep380.py</Arguments>
+          <MaxDuration>600000</MaxDuration>
+          <LongRunning>false</LongRunning>
+          <Disabled>false</Disabled>
+          <RequiresAdmin>false</RequiresAdmin>
+          <NotParallelSafe>false</NotParallelSafe>
+          <WorkingDirectory>%DLR_ROOT%\Languages\IronPython\Tests</WorkingDirectory>
+        </Test>
+        <Test>
           <Name>test_builtinfunc_20</Name>
           <Filename>%DLR_ROOT%\Languages\IronPython\Internal\ipy.bat</Filename>
           <Arguments>test_builtinfunc.py</Arguments>

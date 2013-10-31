@@ -31,7 +31,7 @@ namespace IronPython.Runtime {
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Naming", "CA1710:IdentifiersShouldHaveCorrectSuffix"), PythonType("generator")]
     [DontMapIDisposableToContextManager, DontMapIEnumerableToContains]
     public sealed class PythonGenerator : IEnumerator, IEnumerator<object>, ICodeFormattable, IEnumerable, IWeakReferenceable {
-        private readonly Func<MutableTuple, object>/*!*/ _next;     // The delegate which contains the user code to perform the iteration.
+        private readonly Func<MutableTuple, object>/*!*/ _next;     // The delegate which contains the user code to perform the iteration, returns the value returned from return statement.
         private readonly PythonFunction _function;                  // the function which created the generator
         private readonly MutableTuple _data;                        // the closure data we need to pass into each iteration.  Item000 is the index, Item001 is the current value
         private readonly MutableTuple<int, object> _dataTuple;      // the tuple which has our current index and value
@@ -57,12 +57,12 @@ namespace IronPython.Runtime {
         /// These are plumbed through the generator to become parameters to Raise(...) invoked 
         /// at the yield suspension point in the generator.
         /// </summary>
-        private object[] _excInfo;
+        internal object[] _excInfo;
         /// <summary>
         /// Value sent by generator.send().
         /// Since send() could send an exception, we need to keep this different from throwable's value.
         /// </summary>
-        private object _sendValue;
+        internal object _sendValue;
         private WeakRefTracker _tracker;
 
         internal PythonGenerator(PythonFunction function, Func<MutableTuple, object>/*!*/ next, MutableTuple data) {
@@ -88,10 +88,11 @@ namespace IronPython.Runtime {
             if (Closed) {
                 return LightExceptions.Throw(PythonOps.StopIteration());
             }
-            
-            object res = NextWorker();
+
+            object stopValue;
+            object res = NextWorker(out stopValue);
             if (res == OperationFailed.Value) {
-                return LightExceptions.Throw(PythonOps.StopIteration());
+                return LightExceptions.Throw(PythonOps.StopIteration(Context, stopValue));
             }
 
             return res;
@@ -136,7 +137,6 @@ namespace IronPython.Runtime {
             // We create the actual exception from inside the generator so that if the exception's __init__ 
             // throws, the traceback matches that which we get from CPython2.5.
             _excInfo = new object[] { type, value, traceback };
-            Debug.Assert(_sendValue == null);
 
             // Pep explicitly says that Throw on a closed generator throws the exception, 
             // and not a StopIteration exception. (This is different than Next()).
@@ -148,8 +148,10 @@ namespace IronPython.Runtime {
                 }
             }
             
-            if (!((IEnumerator)this).MoveNext()) {
-                return LightExceptions.Throw(PythonOps.StopIteration());
+            CheckSetActive();
+            object stopValue;
+            if (!MoveNextWorker(out stopValue)) {
+                return LightExceptions.Throw(PythonOps.StopIteration(Context, stopValue));
             }
 
             return CurrentValue;
@@ -188,7 +190,7 @@ namespace IronPython.Runtime {
 
             // This function body is the psuedo code straight from Pep 342.
             try {
-                object res = @throw(new GeneratorExitException());
+                object res = @throw(new PythonExceptions.BaseException(PythonExceptions.GeneratorExit));
                 Exception lightEh = LightExceptions.GetLightException(res);
                 if (lightEh != null) {
                     if (lightEh is StopIterationException || lightEh is GeneratorExitException) {
@@ -337,26 +339,36 @@ namespace IronPython.Runtime {
 
             CheckSetActive();
 
+            object dummy;
+            return MoveNextWorker(out dummy);
+        }
+
+        internal bool MoveNextWorker(out object dummy) {
             if (!CanSetSysExcInfo) {
-                return MoveNextWorker();
+                return MoveNextWorkerNoEhHandling(out dummy);
             } else {
                 Exception save = SaveCurrentException();
                 try {
-                    return MoveNextWorker();
+                    return MoveNextWorkerNoEhHandling(out dummy);
                 } finally {
                     RestoreCurrentException(save);
                 }
             }
         }
 
+        internal bool SendNextWorker(object sendValue, out object stopValue) {
+            _sendValue = sendValue;
+            return MoveNextWorker(out stopValue);
+        }
+
         /// <summary>
         /// Core implementation of IEnumerator.MoveNext()
         /// </summary>
-        private bool MoveNextWorker() {
+        internal bool MoveNextWorkerNoEhHandling(out object stopValue) {
             bool ret = false;
             try {
                 try {
-                    _next(_data);
+                    stopValue = _next(_data);
                     ret = State != GeneratorRewriter.Finished;
                 } finally {
                     Active = false;
@@ -364,7 +376,8 @@ namespace IronPython.Runtime {
                         Close();
                     }
                 }
-            } catch (StopIterationException) {
+            } catch (StopIterationException siex) {
+                stopValue = siex.GetValue(Context);
                 return false;
             }
             return ret;
@@ -373,7 +386,7 @@ namespace IronPython.Runtime {
         /// <summary>
         /// Core implementation of Python's next() method.
         /// </summary>
-        private object NextWorker() {
+        private object NextWorker(out object stopValue) {
             // Generators can not be called re-entrantly.
             CheckSetActive();
 
@@ -391,7 +404,7 @@ namespace IronPython.Runtime {
                 //    catch this and terminate the loop without propogating the exception.
                 // 4. Exit via some other unhandled exception: This will close the generator, but the exception still propogates.
                 //    _next does not return, so ret is left assigned to false (closed), which we detect in the finally.
-                if (!(ret = GetNext())) {
+                if (!(ret = GetNext(out stopValue))) {
                     CurrentValue = OperationFailed.Value;
                 }
             } finally {
@@ -422,7 +435,7 @@ namespace IronPython.Runtime {
             return null;
         }
 
-        private void CheckSetActive() {
+        internal void CheckSetActive() {
             if (Active) {
                 // A generator could catch this exception and continue executing, so this does
                 // not necessarily close the generator.
@@ -458,7 +471,7 @@ namespace IronPython.Runtime {
             return CheckThrowable();
         }
 
-        private object SwapValues() {
+        internal object SwapValues() {
             object sendValueBackup = _sendValue;
             _sendValue = null;
             return sendValueBackup;
@@ -522,8 +535,8 @@ namespace IronPython.Runtime {
             }
         }
 
-        private bool GetNext() {
-            _next(_data);
+        private bool GetNext(out object stopValue) {
+            stopValue = _next(_data);
             return State != GeneratorRewriter.Finished;
         }
 

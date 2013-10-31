@@ -32,6 +32,8 @@ using IronPython.Runtime;
 using IronPython.Runtime.Operations;
 
 using AstUtils = Microsoft.Scripting.Ast.Utils;
+using IpyAst = IronPython.Compiler.Ast;
+using Microsoft.Scripting.Runtime;
 
 namespace IronPython.Compiler {
     /// <summary>
@@ -68,7 +70,9 @@ namespace IronPython.Compiler {
         internal const int NotStarted = -1;
         internal const int Finished = 0;
         internal static ParameterExpression _generatorParam = Expression.Parameter(typeof(PythonGenerator), "$generator");
-        
+        private static ParameterExpression _generatorReturnValue = Expression.Parameter(typeof(object), "retValue");
+        internal static Expression _checkThrowExpression = LightExceptions.CheckAndThrow(Expression.Call(IronPython.Compiler.Ast.AstMethods.GeneratorCheckThrowableAndReturnSendValue, _generatorParam));
+
         internal GeneratorRewriter(string name, Expression body) {
             _body = body;
             _name = name;
@@ -122,6 +126,8 @@ namespace IronPython.Compiler {
             // temps for the outer lambda
             ParameterExpression tupleTmp = Expression.Parameter(tupleType, "tuple");
             ParameterExpression ret = Expression.Parameter(typeof(PythonGenerator), "ret");
+            
+            _temps.Add(_generatorReturnValue);
 
             var innerLambda = Expression.Lambda<Func<MutableTuple, object>>(
                 Expression.Block(
@@ -137,7 +143,7 @@ namespace IronPython.Compiler {
                     body,
                     MakeAssign(_state, AstUtils.Constant(Finished)),
                     Expression.Label(_returnLabels.Peek()),
-                    _current
+                    _generatorReturnValue
                 ),
                 _name,
                 new ParameterExpression[] { tupleArg }
@@ -595,6 +601,11 @@ namespace IronPython.Compiler {
         }
 
         protected override Expression VisitExtension(Expression node) {
+            IpyAst.ReturnStatement ret = node as IpyAst.ReturnStatement;
+            if (ret != null) {
+                return VisitReturn(ret);
+            }
+
             var yield = node as YieldExpression;
             if (yield != null) {
                 return VisitYield(yield);
@@ -608,20 +619,22 @@ namespace IronPython.Compiler {
             return Visit(node.ReduceExtensions());
         }
 
+        private Expression VisitReturn(IpyAst.ReturnStatement ret) {
+            return Expression.Block(
+                Expression.Assign(_generatorReturnValue, Visit(IpyAst.Node.TransformOrConstantNull(ret.Expression, typeof(object)))),
+                MakeCloseGenerator()
+            );
+        }
+        
         private Expression VisitYield(YieldExpression node) {
             var value = Visit(node.Value);
 
-            var block = new List<Expression>();
             if (value == null) {
                 // Yield break
-                block.Add(MakeAssign(_state, AstUtils.Constant(Finished)));
-                if (_inTryWithFinally) {
-                    block.Add(Expression.Assign(_gotoRouter, AstUtils.Constant(GotoRouterYielding)));
-                }
-                block.Add(Expression.Goto(_returnLabels.Peek()));
-                return Expression.Block(block);
+                return MakeCloseGenerator();
             }
 
+            var block = new List<Expression>();
             // Yield return
             block.Add(MakeAssign(_current, value));
             YieldMarker marker = GetYieldMarker(node);
@@ -633,6 +646,16 @@ namespace IronPython.Compiler {
             block.Add(Expression.Label(marker.Label));
             block.Add(Expression.Assign(_gotoRouter, AstUtils.Constant(GotoRouterNone)));
             block.Add(Utils.Empty());
+            return Expression.Block(block);
+        }
+
+        private Expression MakeCloseGenerator() {
+            var block = new List<Expression>();
+            block.Add(MakeAssign(_state, AstUtils.Constant(Finished)));
+            if (_inTryWithFinally) {
+                block.Add(Expression.Assign(_gotoRouter, AstUtils.Constant(GotoRouterYielding)));
+            }
+            block.Add(Expression.Goto(_returnLabels.Peek()));
             return Expression.Block(block);
         }
 

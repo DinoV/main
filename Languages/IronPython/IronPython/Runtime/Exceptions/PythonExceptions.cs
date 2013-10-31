@@ -1242,7 +1242,7 @@ for k, v in toError.iteritems():
         /// <summary>
         /// Creates a new type for a built-in exception which is the root concrete type.  
         /// </summary>
-        private static PythonType/*!*/ CreateSubType(PythonType/*!*/ baseType, Type/*!*/ concreteType, Func<string, Exception> exceptionMaker) {
+        internal static PythonType/*!*/ CreateSubType(PythonType/*!*/ baseType, Type/*!*/ concreteType, Func<string, Exception> exceptionMaker) {
             Assert.NotNull(baseType, concreteType);
 
             PythonType myType = DynamicHelpers.GetPythonTypeFromType(concreteType);

@@ -101,6 +101,7 @@ namespace IronPython.Compiler.Ast {
         public static readonly MethodInfo FormatString = GetMethod((Func<CodeContext, string, object, string>)PythonOps.FormatString);
         public static readonly MethodInfo GetUnicodeFunction = GetMethod((Func<BuiltinFunction>)PythonOps.GetUnicodeFuntion);
         public static readonly MethodInfo GeneratorCheckThrowableAndReturnSendValue = GetMethod((Func<object, object>)PythonOps.GeneratorCheckThrowableAndReturnSendValue);
+        public static readonly MethodInfo YieldFromNext = typeof(PythonOps).GetMethod("YieldFromNext");
         
         private static MethodInfo GetMethod(Delegate x) {
             return x.Method;

@@ -17,6 +17,9 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.Serialization;
 using Microsoft.Scripting.Runtime;
+using IronPython.Runtime.Operations;
+using IronPython.Runtime.Types;
+using IronPython.Modules;
 
 namespace IronPython.Runtime.Exceptions {
     /// <summary>
@@ -34,6 +37,18 @@ namespace IronPython.Runtime.Exceptions {
         private object _pyExceptionObject;
         private List<DynamicStackFrame> _frames;
         private TraceBack _traceback;
+        private object _value;
+        private readonly PythonContext _context;
+
+        public StopIterationException(CodeContext context, object value)
+            : base(PythonOps.ToString(value)) { 
+            _value = value; 
+            _context = context.LanguageContext; 
+        }
+        public StopIterationException(CodeContext context)
+            : base() {
+            _context = context.LanguageContext;
+        }
 
         public StopIterationException() : base() { }
         public StopIterationException(string msg) : base(msg) { }
@@ -54,13 +69,29 @@ namespace IronPython.Runtime.Exceptions {
         object IPythonAwareException.PythonException {
             get { 
                 if (_pyExceptionObject == null) {
-                    var newEx = new PythonExceptions.BaseException(PythonExceptions.StopIteration);
-                    newEx.InitializeFromClr(this);
+                    PythonExceptions.BaseException newEx;
+                    if (_context == null || !_context.PythonOptions.Python30) {
+                        newEx = new PythonExceptions.BaseException(PythonExceptions.StopIteration);
+                    } else {
+                        newEx = new Builtin._StopIteration3k(Builtin._stopIterationException3x);
+                    }
+                    newEx.__init__();
+                    if (_value != null) {
+                        newEx.args = new[] { _value };
+                    }
                     _pyExceptionObject = newEx;
+                    newEx.__dict__["value"] = _value;
                 }
                 return _pyExceptionObject; 
             }
             set { _pyExceptionObject = value; }
+        }
+
+        public object GetValue(CodeContext context) {
+            if (context.LanguageContext.PythonOptions.Python30 && _pyExceptionObject != null) {
+                return PythonOps.GetBoundAttr(context, _pyExceptionObject, "value");
+            }
+            return _value;
         }
 
         List<DynamicStackFrame> IPythonAwareException.Frames {

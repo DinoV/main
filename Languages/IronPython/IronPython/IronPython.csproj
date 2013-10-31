@@ -61,6 +61,7 @@
     <Compile Include="Compiler\Ast\PythonConstantExpression.cs" />
     <Compile Include="Compiler\Ast\SerializedScopeStatement.cs" />
     <Compile Include="Compiler\Ast\SetExpression.cs" />
+    <Compile Include="Compiler\Ast\YieldFromExpression.cs" />
     <Compile Include="Compiler\CollectableCompilationMode.cs" />
     <Compile Include="Compiler\Ast\AssertStatement.cs" />
     <Compile Include="Compiler\Ast\AssignmentStatement.cs" />
@@ -419,6 +420,7 @@
     <Compile Include="Runtime\Types\PythonSiteCache.cs" />
     <Compile Include="Runtime\Types\PythonType.Generated.cs" />
     <Compile Include="Runtime\Types\PythonTypeDataSlot.cs" />
+    <Compile Include="Runtime\Types\PythonTypeNullSlot.cs" />
     <Compile Include="Runtime\Types\ResolvedMember.cs" />
     <Compile Include="Runtime\Types\SlotFieldAttribute.cs" />
     <Compile Include="Runtime\Types\PythonTypeDictSlot.cs" />

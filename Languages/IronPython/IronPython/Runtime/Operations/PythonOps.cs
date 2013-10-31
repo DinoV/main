@@ -4155,6 +4155,13 @@ namespace IronPython.Runtime.Operations {
             return res;
         }
 
+        public static Exception StopIteration(CodeContext context, object value) {
+            if (value == null) {
+                return new StopIterationException(context);
+            }
+            return new StopIterationException(context, value);
+        }
+
         public static Exception StopIteration() {
             return StopIteration("");
         }
@@ -4514,6 +4521,240 @@ namespace IronPython.Runtime.Operations {
         public static object GetExtensionMethodSet(CodeContext context) {
             return context.ModuleContext.ExtensionMethods;
         }
+
+        #region Yield From support
+
+        /// <summary>
+        /// Gets the next value for a yield from expression.  
+        /// </summary>
+        /// <param name="outerGen">The generator object which is calling yield from</param>
+        /// <param name="iter">The iterable which is being yield from'd</param>
+        /// <param name="result">When returning true, the value to be yielded.  When returning false, the return value of the generator or a light exception.</param>
+        /// <param name="iterable">Holds the temporary IEnumerator if the object is not a generator.  Created on 1st iteration, and reused after</param>
+        /// <returns>True if a value is yielded, or false if the iteration resulted with a value or a light exception.</returns>
+        public static bool YieldFromNext(PythonGenerator outerGen, object iter, out object result, ref IEnumerator iterable) {
+            if (outerGen._excInfo == null) {
+                PythonGenerator gen = iter as PythonGenerator;
+                if (gen != null) {
+                    // yield from is being used with a generator, we can make this nice and efficient
+                    return YieldFromToGenerator(outerGen, gen, out result);
+                } 
+
+                // it's some arbitrary object, we'll need to dynamically call stuff...
+                return YieldFromToNonGenerator(outerGen, iter, ref iterable, out result);
+            }
+
+            // PEP380: except clauses
+            // someone did a .throw on the outer generator, send it on down
+            return YieldFromThrow(outerGen, iter, out result);
+        }
+
+        /// <summary>
+        /// Handles yield from when the iterable is not a generator.  We'll create an IEnumerator for the object and
+        /// use that for iteration which will be fast against things like range.  
+        /// </summary>
+        private static bool YieldFromToNonGenerator(PythonGenerator outerGen, object iter, ref IEnumerator iterable, out object result) {
+            if (iterable == null) {
+                // 1st time through, create the IEnumerator
+                // PEP380: _i = iter(EXPR)
+                iterable = PythonOps.GetEnumerator(outerGen.Context, iter);
+            }
+
+            // PEP380: if _s is None:
+            if (outerGen._sendValue == null) {
+                PythonEnumerator pyEnum = iterable as PythonEnumerator;
+                if (pyEnum != null) {
+                    // we've created a PythonEnumerator for some arbitrary Python object. It
+                    // can raise StopIteration exception direcly, in which case we need to return
+                    // the resulting value.  
+                    object value;
+                    if (pyEnum.MoveNextWorker(outerGen.Context, out value)) {
+                        // PEP380: _y = next(_i)
+                        result = pyEnum.Current;
+                        return true;
+                    }
+                    // PEP380: except StopIteration as _e:
+                    // PEP380:      _r = _e.value
+                    result = value;
+                    return false;
+                } else if (iterable.MoveNext()) {
+                    // some other typical .NET enumerable, including things like range, these
+                    // won't raise StopIteration with a value
+                    result = iterable.Current;
+                    return true;
+                }
+
+                // iteration has ended, and we have no value for the expression
+                result = null;
+                return false;
+            }
+
+            // PEP380: else:
+            // PEP380:         _y = _i.send(_s)
+
+            // send the value, if the object doesn't support send, this will raise            
+            try {
+                object sendMethod = PythonOps.GetBoundAttr(outerGen.Context, PythonEnumerator.Unwrap(iterable), "send");
+                result = PythonOps.CallWithContext(outerGen.Context, sendMethod, outerGen.SwapValues());
+                return true;
+            } catch (StopIterationException sie) {
+                // PEP380: except StopIteration as _e:
+                // PEP380:     _r = _e.value
+                // PEP380:     break
+                result = sie.GetValue(outerGen.Context);
+                return false;
+            }
+        }
+
+        private static bool YieldFromToGenerator(PythonGenerator outerGen, PythonGenerator gen, out object result) {
+            object stopValue;
+            bool moveResult;
+
+            gen.CheckSetActive();
+
+            // PEP380: if _s is None:
+            if (outerGen._sendValue == null) {
+                // PEP380:     _y = next(_i)
+                // no value to send, just advance the inner generator
+                moveResult = gen.MoveNextWorker(out stopValue);
+            } else {
+                // PEP380: else:
+                // PEP380:     _y = _i.send(_s)
+                // send the value from the outer generator into the inner generator
+                moveResult = gen.SendNextWorker(outerGen._sendValue, out stopValue);
+            }
+
+            if (moveResult) {
+                // if we moved forward, get the current value
+                result = ((IEnumerator)gen).Current;
+            } else {
+                // otherwise we're stopping, return the value of StopIteration
+                // PEP380: except StopIteration as _e:
+                // PEP380:     _r = _e.value
+                // PEP380:     break
+                result = stopValue;
+            }
+            return moveResult;
+        }
+
+        private static bool YieldFromThrow(PythonGenerator outerGen, object iter, out object result) {
+            object[] excInf = outerGen._excInfo;
+            outerGen._excInfo = null;
+
+            PythonGenerator gen = iter as PythonGenerator;
+            if (gen != null) {
+                if (IsGeneratorExit(outerGen, excInf)) {
+                    // PEP380: except GeneratorExit as _e:
+                    // PEP380:     try:
+                    // PEP380:         _m = _i.close
+                    // PEP380:     except AttributeError:
+                    // PEP380:          pass
+                    // PEP380:     else:
+                    // PEP380:         _m()
+                    // PEP380:     raise _e 
+                    // GeneratorExit is not passed into throw, instead it closes
+                    result = gen.close();
+                    if (!LightExceptions.IsLightException(result)) {
+                        result = LightExceptions.Throw(PythonOps.MakeException(outerGen.Context, excInf[0], excInf[1], excInf[2]));
+                    }
+                    return false;
+                }
+
+                try {
+                    // PEP380: _x = sys.exc_info()
+                    // PEP380: try:
+                    // PEP380:    _m = _i.throw
+                    // PEP380: except AttributeError:
+                    // PEP380:     raise _e 
+                    // PEP380: else:
+                    // PEP380:     try:
+                    // PEP380:         _y = _m(*_x)
+                    result = gen.@throw(excInf[0], excInf[1], excInf[2]);
+                    return GetThrowResult(outerGen, ref result);
+                } catch (StopIterationException sie) {
+                    // PEP380:     except StopIteration as _e:
+                    // PEP380:         _r = _e.value
+                    // PEP380:         break
+                    result = sie.GetValue(outerGen.Context);
+                    return false;
+                }
+            } else {
+                object throwFunc;
+
+                if (IsGeneratorExit(outerGen, excInf)) {
+                    // PEP380: except GeneratorExit as _e:
+                    // PEP380:     try:
+                    // PEP380:         _m = _i.close
+                    // PEP380:     except AttributeError:
+                    // PEP380:          pass
+                    // PEP380:     else:
+                    // PEP380:         _m()
+                    // PEP380:     raise _e 
+                    // GeneratorExit is not passed into throw, instead it closes, and we fall through to the re-raise below.
+                    object close;
+                    bool gotClose;
+                    try {
+                        gotClose = PythonOps.TryGetBoundAttr(outerGen.Context, PythonEnumerator.Unwrap(iter), "close", out close);
+                    } catch(Exception e) {
+                        PythonOps.PrintException(outerGen.Context, e, null);
+                        gotClose = false;
+                        close = null;
+                    }
+                    if (gotClose) {
+                        PythonOps.CallWithContext(outerGen.Context, close);
+                    }
+                } else if (PythonOps.TryGetBoundAttr(PythonEnumerator.Unwrap(iter), "throw", out throwFunc)) {
+                    // PEP380: _x = sys.exc_info()
+                    // PEP380: try:
+                    // PEP380:    _m = _i.throw
+                    // PEP380: except AttributeError:
+                    // PEP380:     raise _e 
+                    // PEP380: else:
+                    // PEP380:     try:
+                    // PEP380:         _y = _m(*_x)
+                    try {
+                        result = outerGen.Context.LanguageContext.CallLightEh(outerGen.Context, throwFunc, excInf[0], excInf[1], excInf[2]);
+                        return GetThrowResult(outerGen, ref result);
+                    } catch (StopIterationException se) {
+                        // PEP380:     except StopIteration as _e:
+                        // PEP380:         _r = _e.value
+                        // PEP380:         break
+                        result = se.GetValue(outerGen.Context);
+                        return false;
+                    }
+                } 
+
+                result = LightExceptions.Throw(PythonOps.MakeException(outerGen.Context, excInf[0], excInf[1], excInf[2]));
+                return false;                
+            }
+        }
+
+        /// <summary>
+        /// Translates result of light throw into a yield or break and accounts for StopIteration exceptions.
+        /// </summary>
+        private static bool GetThrowResult(PythonGenerator outerGen, ref object result) {
+            var excep = LightExceptions.GetLightException(result);
+            if (excep != null) {
+                if (excep is StopIterationException) {
+                    // PEP380:     except StopIteration as _e:
+                    // PEP380:         _r = _e.value
+                    // PEP380:         break
+                    result = ((StopIterationException)excep).GetValue(outerGen.Context);
+                }
+                return false;
+            }
+            return true;
+        }
+        
+        private static bool IsGeneratorExit(PythonGenerator outerGen, object[] excInf) {
+            PythonType pt = excInf[0] as PythonType;
+            if (pt != null) {
+                return PythonOps.IsSubClass(outerGen.Context, (PythonType)excInf[0], PythonExceptions.GeneratorExit);
+            }
+            return PythonOps.IsInstance(outerGen.Context, excInf[0], PythonExceptions.GeneratorExit);
+        }
+
+        #endregion
     }
 
     /// <summary>

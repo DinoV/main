@@ -63,6 +63,7 @@ namespace IronPython.Compiler {
         private SourceCodeReader _sourceReader;
         private int _errorCode;
         private readonly CompilerContext _context;
+        private readonly bool _py3k;
         private PythonAst _globalParent;
 
         private static readonly char[] newLineChar = new char[] { '\n' };
@@ -70,7 +71,7 @@ namespace IronPython.Compiler {
       
         #region Construction
 
-        private Parser(CompilerContext context, Tokenizer tokenizer, ErrorSink errorSink, ParserSink parserSink, ModuleOptions languageFeatures) {
+        private Parser(CompilerContext context, Tokenizer tokenizer, ErrorSink errorSink, ParserSink parserSink, ModuleOptions languageFeatures, bool python3k) {
             ContractUtils.RequiresNotNull(tokenizer, "tokenizer");
             ContractUtils.RequiresNotNull(errorSink, "errorSink");
             ContractUtils.RequiresNotNull(parserSink, "parserSink");
@@ -79,6 +80,7 @@ namespace IronPython.Compiler {
 
             _tokenizer = tokenizer;
             _errors = errorSink;
+            _py3k = python3k;
             if (parserSink != ParserSink.Null) {
                 _sink = parserSink;
             }
@@ -123,7 +125,7 @@ namespace IronPython.Compiler {
             tokenizer.Initialize(null, reader, context.SourceUnit, SourceLocation.MinValue);
             tokenizer.IndentationInconsistencySeverity = options.IndentationInconsistencySeverity;
 
-            Parser result = new Parser(context, tokenizer, context.Errors, context.ParserSink, compilerOptions.Module);
+            Parser result = new Parser(context, tokenizer, context.Errors, context.ParserSink, compilerOptions.Module, options.Python30);
             result._sourceReader = reader;
             return result;
         }
@@ -566,7 +568,7 @@ namespace IronPython.Compiler {
 
             if (expr != null) {
                 _returnWithValue = true;
-                if (_isGenerator) {
+                if (_isGenerator && !_py3k) {
                     ReportSyntaxError("'return' with argument inside generator");
                 }
             }
@@ -592,7 +594,7 @@ namespace IronPython.Compiler {
             }
 
             _isGenerator = true;
-            if (_returnWithValue) {
+            if (_returnWithValue && !_py3k) {
                 ReportSyntaxError("'return' with argument inside generator");
             }
 
@@ -613,7 +615,8 @@ namespace IronPython.Compiler {
         /// Called w/ yield already eaten.
         /// </summary>
         /// <returns>A yield expression if present, else null. </returns>
-        // yield_expression: "yield" [expression_list] 
+        // 2.7: yield_expression: "yield" [expression_list] 
+        // 3.3: yield_expression: "yield" [expression_list | "from" expression] 
         private Expression ParseYieldExpression() {
             // Mark that this function is actually a generator.
             // If we're in a generator expression, then we don't have a function yet.
@@ -625,6 +628,10 @@ namespace IronPython.Compiler {
             }
 
             var start = GetStart();
+
+            if (_py3k && MaybeEat(TokenKind.KeywordFrom)) {
+                return ParseYieldFromExpression(start);
+            }
 
             // Parse expression list after yield. This can be:
             // 1) empty, in which case it becomes 'yield None'
@@ -650,6 +657,12 @@ namespace IronPython.Compiler {
             yieldExpression.SetLoc(_globalParent, start, GetEnd());
             return yieldExpression;
 
+        }
+
+        private Expression ParseYieldFromExpression(int start) {
+            var res = new YieldFromExpression(ParseExpression());
+            res.SetLoc(_globalParent, start, GetEnd());
+            return res;
         }
 
         private Statement FinishAssignments(Expression right) {
